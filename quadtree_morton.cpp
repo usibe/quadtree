@@ -15,12 +15,12 @@ using namespace std;
 #define MAX_PARTICLES (1 << 10) // 最大粒子数
 
 typedef struct TreeNode {
-    int id;
-    double cm[2];
-    double pos[2];
-    double mass;
-    double size;
-    TreeNode *children[4];
+    int id = -1;
+    double cm[2] = {0.0, 0.0}; // center of mass
+    double pos[2] = {0.0, 0.0}; // ノードの左下の座標
+    double mass = 0.0;
+    double size = 0.0; // ノードのサイズ（幅と高さは同じと仮定）
+    int children[4] = {-1, -1, -1, -1}; // 子ノードのID（-1は子なしを表す）
 } TreeNode;
 
 
@@ -62,75 +62,44 @@ void p2key(vector<Particle> &particle, vector<pair<int,int> > &key, int n, int l
 void treeConstruction(vector<TreeNode> &node,
                      vector<Particle> &particle,
                      vector<pair<int,int> > &key, 
+                     vector<vector<double>> &csum,
                      int *nid, int level, int left, int right){
     
     level -= 1;
-    double n = right - left;
+    if(level < 0) return;
     int id = *nid;
-    for(int i=left; i<right; i++){
-        int j = key[i].second;
-        node[id].cm[0] += particle[j].pos[0];
-        node[id].cm[1] += particle[j].pos[1];
-        node[id].mass += particle[j].mass;
-    }
-    node[id].cm[0]/=n;
-    node[id].cm[1]/=n;
+    
+    node[id].mass = csum[right][2] - csum[left][2];
+    node[id].cm[0] = (csum[right][0] - csum[left][0]) / node[id].mass;
+    node[id].cm[1] = (csum[right][1] - csum[left][1]) / node[id].mass;
     node[id].id = id; //いるかこれ？
 
-    int npart[4] = {0, 0, 0, 0};
-    for(int i=left; i<right; i++){
-        int ii = (key[i].first >> (2*level)) & 0x3;
-        npart[ii]++;
-    }
-
-    right = left;
-    for(int i=0; i<4; i++){
-        if(npart[i] == 0 || level<=0){
-            node[id].children[i] = nullptr;
-            continue;
+    int start = left;
+    int prev = (key[left].first >> (2*level)) & 0x3;
+    for(int i=left+1; i<=right; i++){
+        if(i != right) {
+            int curr = (key[i].first >> (2*level)) & 0x3;
+            if(prev == curr) continue;
+            prev = curr;
         }
-        *nid+=1;
-        left = right;
-        right += npart[i];
-        node[id].children[i] = &node[*nid]; //childrenに入るのは配列番号だけで良いのでは？
-        treeConstruction(node, particle, key, nid,
-                         level, left, right);
+
+        // ここで [start, i) が1つの子ノード
+        if(level > 0){
+            int child_id = (key[start].first >> (2*level)) & 0x3;
+            (*nid)++;
+            node[id].children[child_id] = *nid;
+            treeConstruction(node, particle, key, csum,
+                            nid, level, start, i);
+        }
+        start = i;
     }
 
 }
-
-/*
-//ノードを最初からセル分割しておいて、ツリー構築を行わないパターン
-void treeConstruction(vector<TreeNode> &node, vector<Particle> &particle,
-                     vector<int> &index, int level, int n){
-
-    int nid = 0;
-    //各粒子のmortonkeyからノードを取得。親の方から順番にposとmassを足していく。最後に平均とって重心出す。
-    for(int i=0; i<n; i++){
-        
-        int x, y, scale=1<<level;
-        x = scale * particle[i].pos[0];
-        y = scale * particle[i].pos[1];
-        int key = get_key(x, y, level);
-
-        for(int j=level-1; j>=0; j--){
-            //mortonkeyから頑張って辿る
-            //子セルがnullじゃなければセルを作成。そうじゃなければ次の階層へスキップ。
-            //タイムステップごとの更新が面倒になるな...どうしようか...
-            int id = (key >> (2*j)) & 0x3;
-            node[nid].cm[0] += particle[i].pos[0];
-            node[nid].cm[1] += particle[i].pos[1];
-            node[nid].mass += particle[i].mass;
-            if() node[nid].children[id] = id; //子ノードのアドレス登録　idはmortonkeyから取ってくる必要がある。
-            //nodeのchildren配列はnull初期化しないといけないな...
-        }
-    }
-}
-*/
 
 
 // pos, sizeを計算しながら再帰
-void treeTrace(TreeNode *node, double pos[2], double size) {
+void treeTrace(vector<TreeNode> &nodes, int node_id, double pos[2], double size) {
+    TreeNode *node = &nodes[node_id];
     node->pos[0] = pos[0];
     node->pos[1] = pos[1];
     node->size = size;
@@ -141,11 +110,11 @@ void treeTrace(TreeNode *node, double pos[2], double size) {
     fprintf(stdout, "Node Mass: %.4f\n\n", node->mass);
     double half = size * 0.5;
     for(int i=0; i<4; i++){
-        if(node->children[i]==nullptr) continue;
+        if(node->children[i]==-1) continue;
         double child_pos[2];
         child_pos[0] = pos[0] + half * (i % 2);
         child_pos[1] = pos[1] + half * (i / 2);
-        treeTrace(node->children[i], child_pos, half);
+        treeTrace(nodes, node->children[i], child_pos, half);
     }
 }
 
@@ -155,6 +124,15 @@ void init_condition(vector<Particle> &particle, int n){
         particle[i].pos[0] = drand48();
         particle[i].pos[1] = drand48();
         particle[i].mass = 1.0/n;
+    }
+}
+
+void init_csum(vector<Particle> &particle, vector<pair<int,int> > &key, vector<vector<double>> &csum, int n){
+    for(int i=0; i<n; i++){
+        int idx = key[i].second;
+        csum[i+1][0] = csum[i][0] + particle[idx].pos[0] * particle[idx].mass;
+        csum[i+1][1] = csum[i][1] + particle[idx].pos[1] * particle[idx].mass;
+        csum[i+1][2] = csum[i][2] + particle[idx].mass;
     }
 }
 
@@ -214,16 +192,17 @@ void drawBoundary(unsigned char img[IMG_SIZE][IMG_SIZE][3], double x, double y, 
     }
 }
 
-void drawTree(unsigned char img[IMG_SIZE][IMG_SIZE][3], TreeNode *node) {
+void drawTree(unsigned char img[IMG_SIZE][IMG_SIZE][3], vector<TreeNode> &nodes, int node_id) {
+    TreeNode *node = &nodes[node_id];
     drawBoundary(img, node->pos[0], node->pos[1], node->size);
     for(int i = 0; i < 4; i++) {
-        if(node->children[i]) {
-            drawTree(img, node->children[i]);
+        if(node->children[i] != -1) {
+            drawTree(img, nodes, node->children[i]);
         }
     }
 }
 
-void outputBitmap(const char *filename, TreeNode *root, vector<Particle> &particle, int n) {
+void outputBitmap(const char *filename, vector<TreeNode> &node, int root_id, vector<Particle> &particle, int n) {
     unsigned char img[IMG_SIZE][IMG_SIZE][3];
     // 白で初期化
     for(int y = 0; y < IMG_SIZE; y++) {
@@ -234,7 +213,7 @@ void outputBitmap(const char *filename, TreeNode *root, vector<Particle> &partic
         }
     }
     // 境界線描画
-    drawTree(img, root);
+    drawTree(img, node, root_id);
     // パーティクル描画
     for(int i = 0; i < n; i++) {
         drawParticle(img, particle[i].pos[0], particle[i].pos[1]);
@@ -276,20 +255,22 @@ int main(){
 
     vector<Particle> particle(n);
     vector<pair<int,int> > key(n);
-    vector<TreeNode> node(NMAX);
+    vector<TreeNode> nodes(NMAX);
+    vector<vector<double>> csum(n+1, vector<double>(3, 0.0)); // 累積和配列(0: x*mass, 1: y*mass, 2: mass)
     
     init_condition(particle, n);
-    p2key(particle, key, n, level); 
+    p2key(particle, key, n, level);
+    init_csum(particle, key, csum, n); 
 
     // ツリー構築
-    treeConstruction(node, particle, key, &nid, level, left, right);
+    treeConstruction(nodes, particle, key, csum, &nid, level, left, right);
 
     // pos/sizeを再帰的にセットしながらトレース
     double root_pos[2] = {0.0, 0.0};
     double root_size = 1.0;
-    treeTrace(&node[0], root_pos, root_size);
+    treeTrace(nodes, 0, root_pos, root_size);
 
     // 画像出力
-    outputBitmap("output.ppm", &node[0], particle, n);
+    outputBitmap("output.ppm", nodes, 0, particle, n);
     return 0;
 }
