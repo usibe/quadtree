@@ -7,6 +7,7 @@
 - quadtree_basic.cpp: 通常の方法によるクワッドツリー構築
 - quadtree_morton.cpp: Mortonキー（Zオーダー）を用いたクワッドツリー構築
 - lbvh.cpp: Mortonキーを用いたMortonキーを利用したLBVH（Linear Bounding Volume Hierarchy）構築
+- lbvh_parallel.cpp: LBVHの並列化バージョン（OpenMPを使用）
 
 ## 使い方
 1. コンパイル
@@ -22,6 +23,10 @@ g++ quadtree_morton.cpp -o quadtree_morton
 ```
 g++ lbvh.cpp -o lbvh
 ```
+または
+```
+g++ lbvh_parallel.cpp -o lbvh_parallel -fopenmp
+```
 
 2. 実行
 
@@ -35,6 +40,10 @@ g++ lbvh.cpp -o lbvh
 または
 ```
 ./lbvh
+```
+または
+```
+./lbvh_parallel
 ```
 
 粒子数を入力すると、output.ppm という画像ファイルが生成されます。
